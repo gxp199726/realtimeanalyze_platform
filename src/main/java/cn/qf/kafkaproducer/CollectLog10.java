@@ -35,7 +35,7 @@ public class CollectLog10 {
                Thread.sleep(1000);
                producer.send(
                        new ProducerRecord<String, String>(
-                               "hz1803", line));
+                               "hz1803b", line));
            }
            bf.close();
            producer.close();

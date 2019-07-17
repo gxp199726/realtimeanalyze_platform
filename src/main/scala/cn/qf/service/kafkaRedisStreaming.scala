@@ -1,7 +1,8 @@
 package cn.qf.service
 
 import java.lang
-import cn.qf.utils.{CaculateTool, MyJedisOffset, MyJedisPool}
+
+import cn.qf.utils.{ MyJedisOffset, MyJedisPool, TimeUtil}
 import com.alibaba.fastjson.JSON
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
@@ -21,13 +22,13 @@ object kafkaRedisStreaming {
       .set("spark.streaming.kafka.maxRatePerPartition","100")
       // 设置序列化机制
       .set("spark.serlizer","org.apache.spark.serializer.KryoSerializer")
-    val ssc = new StreamingContext(conf,Seconds(3))
+    val ssc = new StreamingContext(conf,Seconds(10))
     // 配置参数
     // 配置基本参数
     // 组名
-    val groupId = "test2"
+    val groupId = "zk006"
     // topic
-    val topic = "hz1803"
+    val topic = "hz1803b"
     // 指定Kafka的broker地址（SparkStreaming程序消费过程中，需要和Kafka的分区对应）
     val brokerList = "192.168.153.200:9092"
     // 编写Kafka的配置参数
@@ -69,8 +70,8 @@ object kafkaRedisStreaming {
         )
       }
     val value = ssc.sparkContext.textFile("F:\\bigdata\\HZ1803\\项目（二）01\\充值平台实时统计分析\\city.txt")
-      .map(t=>(t.split(" ")(0),t.split(" ")(1)))
-    val broadcasts = ssc.sparkContext.broadcast(value.collect().toMap)
+    val map = value.map(t=>(t.split(" ")(0),t.split(" ")(1))).collect().toMap
+    val broadcasts = ssc.sparkContext.broadcast(map)
     // 处理数据
     stream.foreachRDD(rdd=>{
       //首先我们想获取处理数据的全信息，包括topic partition、offset
@@ -82,35 +83,53 @@ object kafkaRedisStreaming {
           // 判断充值结果
           val result = t.getString("bussinessRst") // 充值结果
           val fee :Double = if(result.equals("0000")) t.getDouble("chargefee") else 0.0 // 充值金额
-          val startTime = t.getString("RequestId")// 开始充值时间
-          //数据当前日期
-          val day = startTime.substring(0,8)
-          val hour = startTime.substring(8,10)
-          val minute = startTime.substring(10,12)
-          val endTime = t.getString("receiveNotifyTime") // 结束充值时间
+          val isSucc  = if(result.equals("0000")) 1 else 0 // 充值成功数
+          val starttime = t.getString("requestId")// 开始充值时间
+          val endtime = t.getString("receiveNotifyTime") // 结束充值时间
           val pcode = t.getString("provinceCode") // 获得省份编号
           val city = broadcasts.value.get(pcode).toString // 通过省份编号进行取值
-          val isSucc  = if(result.equals("0000")) 1 else 0 // 充值成功数
+
           // 充值时长
-          val costtime :Long = if(result.equals("0000")) CaculateTool.caculateTime(startTime,endTime) else 0
-          //if(result.equals("0000"))
-          (day,hour,List[Double](1,isSucc,fee,costtime),city,minute)
+          val costtime = TimeUtil.costtiem(starttime,endtime)
+          (starttime.substring(0,18),
+            starttime.substring(0,12),
+            starttime.substring(0,10),
+            List[Double](1,fee,isSucc,costtime),
+            (city,starttime.substring(0,10)))
+          }).cache()
+         // 指标1.1
+          val result1 = baseData.map(t=>(t._1,t._4)).reduceByKey((list1,list2)=>{
+            list1.zip(list2).map(t=>t._1+t._2)
           })
-         // 指标1
-      JedisKpi.Result01(baseData)
+          //JedisKpi.Result01(result1)
+        //指标1.2
+          val result2 = baseData.map(t=>(t._3,t._4.head)).reduceByKey(_+_)
+          //JedisKpi.Result02(result2)
+        //指标2
+        val result3 = baseData.map(t=>(t._5,t._4)).reduceByKey((list1,list2)=>{
+          list1.zip(list2).map(t=>t._1+t._2)})
+        //JedisKpi.Result03(result3)
+      //指标3
+      val result4 = baseData.map(t=>(t._5,t._4)).reduceByKey((list1,list2)=>{
+        list1.zip(list2).map(t=>t._1+t._2)})
+        JedisKpi.Result04(result4)
+      //指标4
+        val result5 = baseData.map(t=>(t._3,t._4)).reduceByKey((list1,list2)=>{
+          list1.zip(list2).map(t=>t._1+t._2)})
+        //JedisKpi.Result05(result5)
+      // 更新偏移量
+      val jedis = MyJedisPool.getConnection()
+      // 获取offset信息
+      for(or <- offsetRange){
+        jedis.hset(groupId,or.topic+"-"+or.partition,or.untilOffset.toString)
+      }
+      jedis.close()
+    })
+    // 启动程序
+    ssc.start()
+    ssc.awaitTermination()
+  }
+}
 
 
 
-              // 更新偏移量
-              val jedis = MyJedisPool.getConnection()
-              // 获取offset信息
-              for(or <- offsetRange){
-                jedis.hset(groupId,or.topic+"-"+or.partition,or.untilOffset.toString)
-              }
-              jedis.close()
-            })
-          // 启动程序
-          ssc.start()
-          ssc.awaitTermination()
-        }
-    }
