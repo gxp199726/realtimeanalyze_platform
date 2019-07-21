@@ -95,7 +95,8 @@ object kafkaRedisStreaming {
             starttime.substring(0,12),
             starttime.substring(0,10),
             List[Double](1,fee,isSucc,costtime),
-            (city,starttime.substring(0,10)))
+            (city,starttime.substring(0,10)),
+            city)
           }).cache()
          // 指标1.1
           val result1 = baseData.map(t=>(t._1,t._4)).reduceByKey((list1,list2)=>{
@@ -110,9 +111,9 @@ object kafkaRedisStreaming {
           list1.zip(list2).map(t=>t._1+t._2)})
         //JedisKpi.Result03(result3)
       //指标3
-      val result4 = baseData.map(t=>(t._5,t._4)).reduceByKey((list1,list2)=>{
+      val result4 = baseData.map(t=>(t._6,t._4)).reduceByKey((list1,list2)=>{
         list1.zip(list2).map(t=>t._1+t._2)})
-        JedisKpi.Result04(result4)
+        JedisKpi.Result04(result4,ssc)
       //指标4
         val result5 = baseData.map(t=>(t._3,t._4)).reduceByKey((list1,list2)=>{
           list1.zip(list2).map(t=>t._1+t._2)})

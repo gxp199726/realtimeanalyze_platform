@@ -2,6 +2,7 @@ package cn.qf.service
 
 import cn.qf.utils.{ConnectPoolUtils, MyJedisPool}
 import org.apache.spark.rdd.RDD
+import org.apache.spark.streaming.StreamingContext
 
 object JedisKpi {
   /**
@@ -57,23 +58,27 @@ object JedisKpi {
     })
   }
   /**
-    * 指标2
+    * 指标3
     */
-  def Result04(lines:RDD[((String, String), List[Double])]): Unit ={
-    lines.foreachPartition(f=>{
-      // 获取连接
-      val conn = ConnectPoolUtils.getConnections()
-      // 处理数据
-      f.foreach(t=>{
-//        val sql = "insert into Pro10(province,counts,success) " +
-//          "values('"+(t._1(0),1)+"','"+t._2(0)+"',"+(t._2(2)/t._2(1))+")"
-
-        val state = conn.createStatement()
-        //state.executeUpdate(sql)
-      })
-      // 还链接
+  def Result04(lines:RDD[(String,  List[Double])],ssc:StreamingContext): Unit ={
+    val sortKV = lines.sortBy(_._2.head,false)
+    //求成功率
+    val value = sortKV.map(t=>(t._1,(t._2(2)/t._2.head).toInt,t._2(0).toInt)).take(10)
+      //创建新的rdd
+    val rdd = ssc.sparkContext.makeRDD(value)
+    //循环每个分区
+    rdd.foreachPartition(f=>{
+        // 获取连接
+        val conn = ConnectPoolUtils.getConnections()
+        //将数据存储到Mysql
+        f.foreach(t=>{
+          val sql = "insert into tb_access_status(logDate,pv,uv)" +
+            " values('"+t._1+"','"+t._3+"','"+t._2+"')"
+          val state = conn.createStatement()
+          state.executeUpdate(sql)
+        })
       ConnectPoolUtils.resultConn(conn)
-    })
+      })
   }
   /**
     * 指标4
@@ -89,7 +94,6 @@ object JedisKpi {
         val state = conn.createStatement()
         state.executeUpdate(sql)
       })
-      // 还链接
       ConnectPoolUtils.resultConn(conn)
     })
   }
